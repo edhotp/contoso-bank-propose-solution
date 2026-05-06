@@ -75,7 +75,7 @@ flowchart LR
         ENTRA["Microsoft Entra ID<br/>(SSO • MFA • RLS/OLS)"]
     end
 
-    GW ==>|Secure outbound<br/>HTTPS 443<br/>(Import refresh & DirectQuery)| SM
+    GW ==>|"Secure outbound HTTPS 443<br/>Import refresh & DirectQuery"| SM
     SM --> PBI
     MCP ==>|MCP tool| CS
     CS --> TEAMS
