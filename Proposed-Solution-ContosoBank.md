@@ -41,7 +41,6 @@ Contoso Bank ingin:
 | 7 | **Model Context Protocol (MCP)** | Standar terbuka untuk menghubungkan AI agent (Copilot Studio, VS Code, Claude, Foundry) ke sumber data/tool secara konsisten. | **Fabric Data Agent → MCP Server**; **Copilot Studio → MCP Client**. Transport **Streamable HTTP**, auth OAuth 2.0 / API key. |
 | 8 | **Microsoft Copilot Studio** | Front‑end chatbot untuk karyawan/nasabah internal. | Memanggil Fabric Data Agent via **MCP tool** (rekomendasi) atau koneksi langsung. Wajib aktifkan *generative orchestration*. |
 | 9 | **Microsoft Entra ID** | Autentikasi & otorisasi (SSO, MFA, Conditional Access). | Single identity di seluruh layer, termasuk OAuth 2.0 untuk MCP. |
-| 10 | **Microsoft Purview** *(rekomendasi tambahan)* | Data governance, lineage, sensitivity label, DLP. | Penting untuk industri perbankan. |
 
 ---
 
@@ -80,7 +79,6 @@ flowchart LR
 
     subgraph Security["🔐 Cross-Cutting"]
         ENTRA["Microsoft Entra ID<br/>(SSO • MFA • RLS/OLS)"]
-        PUR["Microsoft Purview<br/>(Governance • Lineage • DLP)"]
     end
 
     GW ==>|Secure outbound<br/>HTTPS 443| PIPE
@@ -91,7 +89,6 @@ flowchart LR
     ENTRA -.-> GW
     ENTRA -.-> Fabric
     ENTRA -.-> CS
-    PUR -.-> Fabric
 
     classDef onprem fill:#FFE8CC,stroke:#D97706,color:#000
     classDef fabric fill:#CCE5FF,stroke:#1E40AF,color:#000
@@ -100,7 +97,7 @@ flowchart LR
     class ORA,GW onprem
     class PIPE,LH,SM,ONT,AGENT,MCP fabric
     class PBI,CS,TEAMS consumer
-    class ENTRA,PUR sec
+    class ENTRA sec
 ```
 
 ---
@@ -240,8 +237,8 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 | **Data in transit** | TLS 1.2+ end‑to‑end. |
 | **Data at rest** | Enkripsi otomatis di OneLake (Microsoft‑managed key, opsional CMK). |
 | **Row/Object‑Level Security** | Dideklarasikan di Semantic Model, dihormati oleh Power BI **dan** Data Agent. |
-| **Sensitivity Labels** | Dipropagasi via **Microsoft Purview** ke semua artefak Fabric. |
-| **Audit** | Fabric activity log + Purview lineage + Copilot Studio analytics + **MCP call audit**. |
+| **Sensitivity Labels** | Diterapkan langsung pada artefak Fabric (lakehouse, semantic model, report). |
+| **Audit** | Fabric activity log + Copilot Studio analytics + **MCP call audit**. |
 | **MCP security** | OAuth 2.0 + RBAC Fabric ditegakkan di setiap MCP call; allowed‑clients list di tenant. |
 | **Compliance** | Sesuai POJK / OJK (data PII tetap di on‑prem jika dibutuhkan via DirectQuery). |
 
@@ -256,7 +253,7 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 | **Fase 3 – Semantic Layer** | Bangun Semantic Model (Import + DirectQuery hybrid), RLS. | Power BI reports |
 | **Fase 4 – Ontology** | Definisikan konsep bisnis di Fabric IQ Ontology. | Business glossary aktif |
 | **Fase 5 – AI Agent + MCP** | Publish Fabric Data Agent → expose sebagai MCP server → daftarkan di Copilot Studio (MCP onboarding wizard, OAuth 2.0). | Chatbot internal berbasis MCP |
-| **Fase 6 – Governance & Scale** | Aktifkan Purview, monitoring, training user. | Production rollout |
+| **Fase 6 – Governance & Scale** | Aktifkan governance Fabric, monitoring, training user. | Production rollout |
 
 ---
 
@@ -288,7 +285,6 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 - [Connect your agent to an existing MCP server (Copilot Studio)](https://learn.microsoft.com/microsoft-copilot-studio/mcp-add-existing-server-to-agent)
 - [Microsoft Copilot Studio documentation](https://learn.microsoft.com/microsoft-copilot-studio/)
 - [Row‑level security (RLS) with Power BI](https://learn.microsoft.com/power-bi/enterprise/service-admin-rls)
-- [Microsoft Purview & Fabric integration](https://learn.microsoft.com/purview/concept-data-map-fabric)
 
 ---
 
