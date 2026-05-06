@@ -43,7 +43,7 @@ Contoso Bank ingin:
 
 ---
 
-## 3. Arsitektur Diagram (Mermaid)
+## 3. Arsitektur Diagram
 
 ```mermaid
 flowchart LR
