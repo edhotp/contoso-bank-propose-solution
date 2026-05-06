@@ -33,14 +33,13 @@ Contoso Bank ingin:
 | # | Komponen | Peran | Catatan |
 |---|----------|-------|---------|
 | 1 | **Oracle Database (On‑Prem)** | Sumber data utama: Core Banking, CRM, Loan, Card. | Tetap di Data Center Contoso. |
-| 2 | **On‑premises Data Gateway** | Jembatan aman antara Oracle dan Microsoft Fabric / Power BI. | Disarankan **Standard Mode** + **High Availability cluster** (min. 2 node). |
-| 3 | **Microsoft Fabric – Lakehouse / Warehouse** | Tempat landing & curated data (Bronze → Silver → Gold) di OneLake. | Menggunakan **Dataflow Gen2** atau **Data Pipeline (Copy Activity)** untuk ingest dari Oracle. |
-| 4 | **Semantic Model (Power BI)** | Model bisnis (measures, hierarchies, RLS). | **Dua opsi**: Import Mode atau DirectQuery — lihat §4. |
-| 5 | **Fabric IQ – Ontology** | Lapisan **business semantics**: konsep, relasi, sinonim, KPI standar. | Membuat AI memahami istilah bisnis ("nasabah prioritas", "saldo rata‑rata"). |
-| 6 | **Fabric Data Agent** | AI agent yang dapat menjawab pertanyaan natural language di atas data Fabric. | Grounded ke Lakehouse/Warehouse + Semantic Model + Ontology. Dapat di‑expose sebagai **MCP server** (preview). |
-| 7 | **Model Context Protocol (MCP)** | Standar terbuka untuk menghubungkan AI agent (Copilot Studio, VS Code, Claude, Foundry) ke sumber data/tool secara konsisten. | **Fabric Data Agent → MCP Server**; **Copilot Studio → MCP Client**. Transport **Streamable HTTP**, auth OAuth 2.0 / API key. |
-| 8 | **Microsoft Copilot Studio** | Front‑end chatbot untuk karyawan/nasabah internal. | Memanggil Fabric Data Agent via **MCP tool** (rekomendasi) atau koneksi langsung. Wajib aktifkan *generative orchestration*. |
-| 9 | **Microsoft Entra ID** | Autentikasi & otorisasi (SSO, MFA, Conditional Access). | Single identity di seluruh layer, termasuk OAuth 2.0 untuk MCP. |
+| 2 | **On‑premises Data Gateway** | Jembatan aman antara Oracle dan Microsoft Fabric / Power BI. Semua query dari Semantic Model ke Oracle melewati gateway ini. | Disarankan **Standard Mode** + **High Availability cluster** (min. 2 node). |
+| 3 | **Semantic Model (Power BI di Fabric)** | Model bisnis (tables, relationships, measures, hierarchies, RLS). **Konek langsung ke Oracle via Data Gateway** — tidak ada lakehouse/pipeline di tengah. | **Dua opsi**: Import Mode atau DirectQuery — lihat §4. |
+| 4 | **Fabric IQ – Ontology** | Lapisan **business semantics**: konsep, relasi, sinonim, KPI standar. | Membuat AI memahami istilah bisnis ("nasabah prioritas", "saldo rata‑rata"). |
+| 5 | **Fabric Data Agent** | AI agent yang menjawab pertanyaan natural language di atas Semantic Model + Ontology. | Dapat di‑expose sebagai **MCP server** (preview). |
+| 6 | **Model Context Protocol (MCP)** | Standar terbuka untuk menghubungkan AI agent (Copilot Studio, VS Code, Claude, Foundry) ke sumber data/tool secara konsisten. | **Fabric Data Agent → MCP Server**; **Copilot Studio → MCP Client**. Transport **Streamable HTTP**, auth OAuth 2.0 / API key. |
+| 7 | **Microsoft Copilot Studio** | Front‑end chatbot untuk karyawan/nasabah internal. | Memanggil Fabric Data Agent via **MCP tool** (rekomendasi). Wajib aktifkan *generative orchestration*. |
+| 8 | **Microsoft Entra ID** | Autentikasi & otorisasi (SSO, MFA, Conditional Access). | Single identity di seluruh layer, termasuk OAuth 2.0 untuk MCP. |
 
 ---
 
@@ -54,18 +53,13 @@ flowchart LR
         ORA -->|JDBC/ODBC| GW
     end
 
-    subgraph Fabric["☁️ Microsoft Fabric (OneLake)"]
+    subgraph Fabric["☁️ Microsoft Fabric"]
         direction TB
-        PIPE["Data Pipeline /<br/>Dataflow Gen2"]
-        LH[("Lakehouse / Warehouse<br/>Bronze • Silver • Gold")]
-        SM["Semantic Model<br/>(Import / DirectQuery)"]
+        SM["Semantic Model<br/>(Import / DirectQuery)<br/>konek langsung ke Oracle"]
         ONT["Fabric IQ Ontology<br/>(Business Concepts & KPI)"]
         AGENT["Fabric Data Agent<br/>(NL → Query)"]
         MCP{{"MCP Server Endpoint<br/>(Streamable HTTP + OAuth 2.0)"}}
-        PIPE --> LH
-        LH --> SM
         SM --> ONT
-        LH --> ONT
         ONT --> AGENT
         SM --> AGENT
         AGENT --> MCP
@@ -81,7 +75,7 @@ flowchart LR
         ENTRA["Microsoft Entra ID<br/>(SSO • MFA • RLS/OLS)"]
     end
 
-    GW ==>|Secure outbound<br/>HTTPS 443| PIPE
+    GW ==>|Secure outbound<br/>HTTPS 443<br/>(Import refresh & DirectQuery)| SM
     SM --> PBI
     MCP ==>|MCP tool| CS
     CS --> TEAMS
@@ -95,7 +89,7 @@ flowchart LR
     classDef consumer fill:#D1FAE5,stroke:#047857,color:#000
     classDef sec fill:#F3E8FF,stroke:#6D28D9,color:#000
     class ORA,GW onprem
-    class PIPE,LH,SM,ONT,AGENT,MCP fabric
+    class SM,ONT,AGENT,MCP fabric
     class PBI,CS,TEAMS consumer
     class ENTRA sec
 ```
@@ -104,19 +98,19 @@ flowchart LR
 
 ## 4. Pilihan Semantic Model: Import vs DirectQuery
 
-Karena sumber data tetap di Oracle on‑prem, kami menyiapkan **dua opsi** yang bisa dipilih per use‑case (atau dikombinasikan via *Composite Model*).
+Semantic Model **konek langsung** ke Oracle on‑prem melalui **On‑premises Data Gateway** — **tanpa** Lakehouse/Warehouse dan **tanpa** Data Pipeline/Dataflow di tengah. Tersedia **dua mode** yang bisa dipilih per use‑case (atau dikombinasikan via *Composite Model*).
 
 ### Opsi A — **Import Mode** (Direkomendasikan untuk dashboard eksekutif & Copilot)
-- Data di‑load periodik (mis. tiap jam / harian) ke dalam semantic model di Fabric.
-- **Performa query sangat cepat** (data in‑memory VertiPaq).
+- Data ditarik **langsung dari Oracle via Data Gateway** dan disimpan di model Power BI (in‑memory VertiPaq) sesuai jadwal **scheduled refresh** (mis. tiap jam / harian).
+- **Performa query sangat cepat** karena data sudah di memori Fabric.
 - Mendukung penuh DAX, agregasi kompleks, dan **cocok untuk AI / Copilot** karena response time rendah.
-- **Trade‑off**: data tidak real‑time; ukuran model terbatas kapasitas Fabric SKU.
+- **Trade‑off**: data tidak real‑time (tergantung frekuensi refresh); ukuran model dibatasi kapasitas Fabric SKU; refresh window membebani Oracle.
 
 ### Opsi B — **DirectQuery Mode** (untuk data near real‑time)
-- Setiap query dieksekusi langsung ke Oracle melalui Data Gateway.
+- Setiap query user dieksekusi **langsung ke Oracle** melalui Data Gateway — tidak ada salinan data di Fabric.
 - **Data selalu up‑to‑date** (mis. saldo nasabah saat ini).
-- **Trade‑off**: latency tergantung Oracle & gateway; beberapa fungsi DAX terbatas; beban ke Oracle meningkat.
-- Wajib: indexing yang baik di Oracle + aggregations table di Power BI.
+- **Trade‑off**: latency tergantung Oracle & gateway; beberapa fungsi DAX terbatas; setiap interaksi user = beban query ke Oracle.
+- Wajib: indexing yang baik di Oracle + *aggregations table* + *query reduction* di Power BI.
 
 ### Rekomendasi Hybrid (Composite Model)
 | Tabel | Mode | Alasan |
@@ -136,7 +130,7 @@ Karena sumber data tetap di Oracle on‑prem, kami menyiapkan **dua opsi** yang 
 - **Relasi**: *Customer* `owns` *Account*; *Account* `has` *Transaction*.
 - **Sinonim**: "nasabah" = "customer" = "client".
 - **KPI standar**: *NPL Ratio*, *CASA Ratio*, *Active Customer*, *AUM*.
-- **Pemetaan** ke tabel/kolom fisik di Lakehouse & Semantic Model.
+- **Pemetaan** ke tabel/kolom di Semantic Model (yang pada gilirannya konek ke Oracle).
 
 **Manfaat untuk Contoso Bank:**
 1. Saat user bertanya *"berapa NPL cabang Jakarta bulan lalu?"* — Data Agent tahu pasti rumus NPL & kolom mana yang dipakai.
@@ -150,10 +144,9 @@ Karena sumber data tetap di Oracle on‑prem, kami menyiapkan **dua opsi** yang 
 ### Alur Tanya‑Jawab
 1. Karyawan mengetik pertanyaan di **Microsoft Teams** (channel Copilot Studio).
 2. **Copilot Studio** (sebagai **MCP client**) mengenali intent, lalu memanggil **Fabric Data Agent MCP tool** melalui endpoint MCP server.
-3. **Fabric Data Agent** menerjemahkan natural language → query (DAX/SQL) menggunakan:
+3. **Fabric Data Agent** menerjemahkan natural language → query (DAX) menggunakan:
    - **Ontology** (untuk arti bisnis),
-   - **Semantic Model** (untuk struktur & measures),
-   - **Lakehouse/Warehouse** (untuk data mentah jika diperlukan).
+   - **Semantic Model** (untuk struktur, measures, RLS) — yang membaca data dari Oracle via Data Gateway (Import refresh atau DirectQuery pass‑through).
 4. Hasil dikembalikan dalam bentuk **angka, tabel, atau chart** di chat.
 5. **RLS (Row‑Level Security)** dievaluasi sesuai identitas Entra user → user hanya melihat data cabang/segmen yang berhak.
 
@@ -168,7 +161,6 @@ sequenceDiagram
     participant FA as Fabric Data Agent
     participant ONT as Ontology
     participant SM as Semantic Model
-    participant LH as Lakehouse
     participant GW as Data Gateway
     participant ORA as Oracle DB
 
@@ -178,14 +170,16 @@ sequenceDiagram
     MCP->>FA: Forward intent + identity
     FA->>ONT: Resolve "NPL", "cabang Jakarta"
     ONT-->>FA: Konsep + measure + filter
-    FA->>SM: Query DAX (Import data)
-    alt DirectQuery diperlukan
+    FA->>SM: Query DAX
+    alt Import Mode (data sudah di-cache)
+        SM-->>FA: Hasil dari in-memory model
+    else DirectQuery Mode
         SM->>GW: Pass-through query
         GW->>ORA: SQL query
         ORA-->>GW: Result set
         GW-->>SM: Result
+        SM-->>FA: Hasil + metadata
     end
-    SM-->>FA: Hasil + metadata
     FA-->>MCP: Result payload
     MCP-->>CS: MCP response (typed)
     CS-->>T: Jawaban + chart (adaptive card)
@@ -237,7 +231,7 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 | **Data in transit** | TLS 1.2+ end‑to‑end. |
 | **Data at rest** | Enkripsi otomatis di OneLake (Microsoft‑managed key, opsional CMK). |
 | **Row/Object‑Level Security** | Dideklarasikan di Semantic Model, dihormati oleh Power BI **dan** Data Agent. |
-| **Sensitivity Labels** | Diterapkan langsung pada artefak Fabric (lakehouse, semantic model, report). |
+| **Sensitivity Labels** | Diterapkan langsung pada artefak Fabric (semantic model, report). |
 | **Audit** | Fabric activity log + Copilot Studio analytics + **MCP call audit**. |
 | **MCP security** | OAuth 2.0 + RBAC Fabric ditegakkan di setiap MCP call; allowed‑clients list di tenant. |
 | **Compliance** | Sesuai POJK / OJK (data PII tetap di on‑prem jika dibutuhkan via DirectQuery). |
@@ -248,12 +242,11 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 
 | Fase | Aktivitas | Output |
 |------|-----------|--------|
-| **Fase 1 – Foundation** | Setup Fabric capacity, Entra grup, install Data Gateway HA. | Konektivitas Oracle ↔ Fabric |
-| **Fase 2 – Data Platform** | Build Lakehouse Bronze/Silver/Gold, pipeline dari Oracle. | Curated dataset |
-| **Fase 3 – Semantic Layer** | Bangun Semantic Model (Import + DirectQuery hybrid), RLS. | Power BI reports |
-| **Fase 4 – Ontology** | Definisikan konsep bisnis di Fabric IQ Ontology. | Business glossary aktif |
-| **Fase 5 – AI Agent + MCP** | Publish Fabric Data Agent → expose sebagai MCP server → daftarkan di Copilot Studio (MCP onboarding wizard, OAuth 2.0). | Chatbot internal berbasis MCP |
-| **Fase 6 – Governance & Scale** | Aktifkan governance Fabric, monitoring, training user. | Production rollout |
+| **Fase 1 – Foundation** | Setup Fabric capacity, Entra grup, install Data Gateway HA, konfigurasi Oracle connector. | Konektivitas Oracle ↔ Fabric |
+| **Fase 2 – Semantic Layer** | Bangun Semantic Model (Import + DirectQuery hybrid) yang konek langsung ke Oracle via gateway, definisikan measures & RLS. | Semantic Model + Power BI reports |
+| **Fase 3 – Ontology** | Definisikan konsep bisnis di Fabric IQ Ontology dan map ke Semantic Model. | Business glossary aktif |
+| **Fase 4 – AI Agent + MCP** | Publish Fabric Data Agent → expose sebagai MCP server → daftarkan di Copilot Studio (MCP onboarding wizard, OAuth 2.0). | Chatbot internal berbasis MCP |
+| **Fase 5 – Governance & Scale** | Aktifkan governance Fabric, monitoring gateway, training user. | Production rollout |
 
 ---
 
