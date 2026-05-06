@@ -35,8 +35,8 @@ Contoso Bank ingin:
 | 1 | **Oracle Database (On‑Prem)** | Sumber data utama: Core Banking, CRM, Loan, Card. | Tetap di Data Center Contoso. |
 | 2 | **On‑premises Data Gateway** | Jembatan aman antara Oracle dan Microsoft Fabric / Power BI. Semua query dari Semantic Model ke Oracle melewati gateway ini. | Disarankan **Standard Mode** + **High Availability cluster** (min. 2 node). |
 | 3 | **Semantic Model (Power BI di Fabric)** | Model bisnis (tables, relationships, measures, hierarchies, RLS). **Konek langsung ke Oracle via Data Gateway** — tidak ada lakehouse/pipeline di tengah. | **Dua opsi**: Import Mode atau DirectQuery — lihat §4. |
-| 4 | **Fabric IQ – Ontology** | Lapisan **business semantics**: konsep, relasi, sinonim, KPI standar. | Membuat AI memahami istilah bisnis ("nasabah prioritas", "saldo rata‑rata"). |
-| 5 | **Fabric Data Agent** | AI agent yang menjawab pertanyaan natural language di atas Semantic Model + Ontology. | Dapat di‑expose sebagai **MCP server** (preview). |
+| 4 | **Fabric IQ – Ontology** | Lapisan **business semantics**: konsep, relasi, sinonim, KPI standar. Bind ke Semantic Model (juga bisa ke Lakehouse/Warehouse/Eventhouse) tanpa menyalin data. | Membuat AI memahami istilah bisnis ("nasabah prioritas", "saldo rata‑rata"). |
+| 5 | **Fabric Data Agent** | AI agent yang menjawab pertanyaan natural language di atas Semantic Model + Ontology. Maks. **5 data sources** per agent; menggunakan **NL2DAX** lewat XMLA endpoint untuk Semantic Model. | Dapat di‑expose sebagai **MCP server** (preview). |
 | 6 | **Model Context Protocol (MCP)** | Standar terbuka untuk menghubungkan AI agent (Copilot Studio, VS Code, Claude, Foundry) ke sumber data/tool secara konsisten. | **Fabric Data Agent → MCP Server**; **Copilot Studio → MCP Client**. Transport **Streamable HTTP**, auth OAuth 2.0 / API key. |
 | 7 | **Microsoft Copilot Studio** | Front‑end chatbot untuk karyawan/nasabah internal. | Memanggil Fabric Data Agent via **MCP tool** (rekomendasi). Wajib aktifkan *generative orchestration*. |
 | 8 | **Microsoft Entra ID** | Autentikasi & otorisasi (SSO, MFA, Conditional Access). | Single identity di seluruh layer, termasuk OAuth 2.0 untuk MCP. |
@@ -199,14 +199,24 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 | **Eventhouse MCP** *(opsional real‑time)* | URI per KQL DB (`Database details → Copy URI`) | Query log/telemetry real‑time (mis. fraud monitoring) | Tim Risk / SOC |
 
 ### Persyaratan & Best Practice
-1. **Kapasitas Fabric**: minimal **F2** (atau Power BI Premium P1 dengan Fabric enabled). Untuk produksi bank disarankan **F64+**.
-2. **Tenant settings**: aktifkan *cross‑geo processing/storing for AI* sesuai kebijakan data residency.
-3. **Authentication**: gunakan **OAuth 2.0** (bukan API key) — Copilot Studio mendukung *Dynamic Discovery (DCR)* yang paling sederhana.
-4. **Transport**: **Streamable HTTP** (SSE sudah deprecated sejak Agustus 2025).
-5. **Generative orchestration** di Copilot Studio harus **ON** agar dapat memanggil MCP tool.
-6. **Deskripsi data agent harus jelas dan akurat** — deskripsi inilah yang menjadi *MCP tool description* dan dipakai orchestrator untuk memutuskan kapan memanggil agent.
-7. **Allowed MCP clients**: batasi client ID yang boleh akses (mis. hanya Copilot Studio + VS Code internal).
-8. **Audit**: semua panggilan MCP tercatat di Fabric audit log dengan identitas user → memenuhi requirement audit perbankan.
+1. **Kapasitas Fabric**: minimal **F2** (atau Power BI Premium **P1**+ dengan Fabric enabled). Untuk produksi bank disarankan **F64+**.
+2. **Lisensi**: **Microsoft 365 Copilot** untuk pembuat agent di Copilot Studio + lisensi user untuk setiap pengguna chatbot. Builder juga butuh izin Copilot Studio.
+3. **Tenant settings (Fabric admin portal)** — wajib aktif:
+   - *Cross‑geo processing for AI* dan *Cross‑geo storing for AI* (sesuai kebijakan data residency).
+   - *Data agent item types (preview)* di tenant settings.
+   - *Standalone Copilot experience* (Power BI admin portal → Copilot) — jika tidak ON, data agent tidak bisa dipakai dalam skenario Copilot.
+4. **Tenant alignment**: Fabric data agent dan Copilot Studio agent **harus di tenant yang sama**, login dengan akun yang sama.
+5. **Authentication MCP**: gunakan **OAuth 2.0** (bukan API key) — Copilot Studio mendukung *Dynamic Discovery (DCR)* yang paling sederhana.
+6. **Transport**: **Streamable HTTP** (SSE sudah deprecated sejak Agustus 2025).
+7. **Generative orchestration** di Copilot Studio harus **ON** agar dapat memanggil MCP tool.
+8. **Deskripsi data agent harus jelas dan akurat** — deskripsi inilah yang menjadi *MCP tool description* dan dipakai orchestrator untuk memutuskan kapan memanggil agent. Data agent juga **wajib di‑publish** sebelum bisa diintegrasikan.
+9. **Allowed MCP clients**: batasi client ID yang boleh akses (mis. hanya Copilot Studio + VS Code internal).
+10. **Audit**: semua panggilan MCP tercatat di Fabric audit log dengan identitas user → memenuhi requirement audit perbankan.
+
+### Catatan penting untuk Semantic Model sebagai Data Agent source
+- **Read permission** pada semantic model **cukup** untuk query via Data Agent (tidak perlu Build/Workspace access). RLS & CLS tetap dihormati.
+- **Example query/question pairs tidak didukung** untuk Semantic Model. Gunakan **Verified Answers** dan **AI Instructions** di **Prep for AI (Power BI)** untuk memberi contoh DAX.
+- *Datasource Description* juga tidak didukung untuk Semantic Model — gunakan **Agent Instructions** untuk mengarahkan routing.
 
 ### Contoh `mcp.json` (untuk uji coba developer di VS Code)
 ```json
@@ -253,11 +263,12 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 ## 9. Asumsi & Hal yang Perlu Diklarifikasi
 
 1. **Fabric SKU** (mis. F64) — perlu disesuaikan dengan volume data & jumlah user Copilot.
-2. **Lisensi Copilot Studio** & **Power BI Pro/PPU** untuk end‑user.
-3. **Versi Oracle** (≥ 12c direkomendasikan) dan driver di gateway.
-4. **Region Azure** (mis. Southeast Asia / Indonesia Central) untuk data residency.
-5. **Network**: ExpressRoute atau internet untuk gateway?
+2. **Lisensi**: Microsoft 365 Copilot (per builder & per pengguna), Power BI Pro/PPU untuk konsumsi report.
+3. **Versi Oracle** ≥ 12c (12.1.0.2) — install **OCMT 64‑bit** di gateway atau aktifkan **bundled Oracle provider (preview)**.
+4. **Region Azure** (mis. Southeast Asia / Indonesia Central) untuk data residency, dan tenant setting *cross‑geo for AI* sesuai kebijakan.
+5. **Network**: ExpressRoute atau internet untuk gateway? (Gateway hanya outbound HTTPS 443 → Azure Service Bus.)
 6. **Data klasifikasi**: kolom mana yang PII / restricted (untuk masking & RLS).
+7. **Performansi DirectQuery**: indexing Oracle, *aggregations table*, dan *query reduction* sudah disiapkan.
 
 ---
 
@@ -265,12 +276,21 @@ Microsoft Fabric & Copilot Studio mengadopsi **MCP** sebagai standar integrasi A
 
 - [On‑premises data gateway documentation](https://learn.microsoft.com/data-integration/gateway/)
 - [Connect to Oracle database from Power Query](https://learn.microsoft.com/power-query/connectors/oracle-database)
-- [Semantic models in Power BI / Fabric](https://learn.microsoft.com/power-bi/connect-data/service-datasets-understand)
+- [Connect to an Oracle database with Power BI Desktop](https://learn.microsoft.com/power-bi/connect-data/desktop-connect-oracle-database)
+- [Manage your data source – Oracle (gateway)](https://learn.microsoft.com/power-bi/connect-data/service-gateway-onprem-manage-oracle)
+- [Power BI implementation planning: Data gateways](https://learn.microsoft.com/power-bi/guidance/powerbi-implementation-planning-data-gateways)
 - [Use DirectQuery in Power BI](https://learn.microsoft.com/power-bi/connect-data/desktop-use-directquery)
 - [Composite models in Power BI](https://learn.microsoft.com/power-bi/transform-model/desktop-composite-models)
 - [Microsoft Fabric overview](https://learn.microsoft.com/fabric/fundamentals/microsoft-fabric-overview)
-- [Fabric Data Agent overview](https://learn.microsoft.com/fabric/data-science/concept-data-agent)
-- [Consume Fabric data agent in Copilot Studio](https://learn.microsoft.com/fabric/data-science/data-agent-copilot-studio)
+- [What is Fabric IQ (preview)?](https://learn.microsoft.com/fabric/iq/overview)
+- [Fabric Ontology overview](https://learn.microsoft.com/fabric/iq/ontology/overview)
+- [Fabric Data Agent concepts](https://learn.microsoft.com/fabric/data-science/concept-data-agent)
+- [Create a Fabric data agent](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent)
+- [Add and configure data sources in Fabric data agent](https://learn.microsoft.com/fabric/data-science/data-agent-add-datasources)
+- [Semantic model best practices for data agent](https://learn.microsoft.com/fabric/data-science/semantic-model-best-practices)
+- [Prep data for AI (Power BI)](https://learn.microsoft.com/power-bi/create-reports/copilot-prepare-data-ai)
+- [Fabric data agent sharing & permissions](https://learn.microsoft.com/fabric/data-science/data-agent-sharing)
+- [Consume Fabric data agent in Copilot Studio](https://learn.microsoft.com/fabric/data-science/data-agent-microsoft-copilot-studio)
 - [Consume Fabric data agent as a Model Context Protocol server](https://learn.microsoft.com/fabric/data-science/data-agent-mcp-server)
 - [What are Fabric MCP Servers? (Core vs Pro‑Dev)](https://learn.microsoft.com/rest/api/fabric/articles/mcp-servers/what-is-fabric-mcp-server)
 - [Fabric Core MCP Server overview](https://learn.microsoft.com/rest/api/fabric/articles/mcp-servers/core-remote/overview-core-mcp-server)
